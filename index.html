@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phone Number Camera Scanner</title>
+  <!-- Load Tesseract.js for browser OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #121212;
+      color: #ffffff;
+      margin: 0;
+      padding: 15px;
+    }
+    .video-container {
+      position: relative;
+      max-width: 500px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+    video {
+      width: 100%;
+      display: block;
+    }
+    canvas {
+      display: none;
+    }
+    #controls {
+      margin-top: 15px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #aaa;
+    }
+    #result-box {
+      margin-top: 20px;
+      padding: 15px;
+      background: #1e1e1e;
+      border-radius: 8px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .number-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .number-item {
+      padding: 12px;
+      background: #2a2a2a;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #00d2ff;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .number-item:hover, .number-item.selected {
+      background: #007bff;
+      color: #ffffff;
+      border-color: #007bff;
+    }
+    .btn-group {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 15px;
+      flex-wrap: wrap;
+    }
+    .action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 20px;
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+      border-radius: 6px;
+      font-size: 15px;
+    }
+    .call-btn {
+      background: #28a745;
+    }
+    .whatsapp-btn {
+      background: #25d366;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Number Camera Scanner</h2>
+  <div class="video-container">
+    <video id="webcam" autoplay playsinline></video>
+  </div>
+  
+  <canvas id="snapshot"></canvas>
+
+  <div id="controls">
+    <button id="scan-btn">Scan Frame</button>
+  </div>
+
+  <p id="status">Point your camera at numbers and click Scan.</p>
+
+  <div id="result-box">
+    <h3 id="result-header">Detected Numbers:</h3>
+    <div id="numbers-container">None detected yet</div>
+    <div id="action-container"></div>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('snapshot');
+    const scanBtn = document.getElementById('scan-btn');
+    const statusText = document.getElementById('status');
+    const numbersContainer = document.getElementById('numbers-container');
+    const actionContainer = document.getElementById('action-container');
+
+    // 1. Initialize Back Camera
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: "environment" } }
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          video.srcObject = stream;
+        } catch (e) {
+          statusText.innerText = "Camera access denied or unavailable.";
+        }
+      }
+    }
+
+    initCamera();
+
+    // 2. Capture Frame and Perform OCR
+    scanBtn.addEventListener('click', async () => {
+      statusText.innerText = "Analyzing image...";
+      numbersContainer.innerHTML = "";
+      actionContainer.innerHTML = "";
+      
+      const context = canvas.getContext('2d');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Recognize text from canvas
+      const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+      statusText.innerText = "Scan complete.";
+
+      // 3. Regex for +91 numbers or 10-digit Indian mobile numbers
+      const phoneRegex = /(?:\+91[\s-]?)?[6-9]\d{9}/g;
+      const matches = text.match(phoneRegex);
+
+      if (matches && matches.length > 0) {
+        // Process & Deduplicate numbers
+        const uniqueNumbers = [...new Set(matches.map(num => {
+          let digitsOnly = num.replace(/\D/g, '');
+          return '+91' + digitsOnly.slice(-10);
+        }))];
+
+        numbersContainer.innerHTML = `<p>Select a number from below (${uniqueNumbers.length} found):</p>`;
+        
+        const listDiv = document.createElement('div');
+        listDiv.className = 'number-list';
+
+        uniqueNumbers.forEach((num) => {
+          const item = document.createElement('div');
+          item.className = 'number-item';
+          item.innerText = num;
+          
+          item.addEventListener('click', () => {
+            // Highlight selected number
+            document.querySelectorAll('.number-item').forEach(el => el.classList.remove('selected'));
+            item.classList.add('selected');
+            
+            // Show Call & WhatsApp actions for selected number
+            showActions(num);
+          });
+
+          listDiv.appendChild(item);
+        });
+
+        numbersContainer.appendChild(listDiv);
+
+      } else {
+        numbersContainer.innerText = "No valid 10-digit or +91 numbers found.";
+      }
+    });
+
+    // 4. Render Action Buttons
+    function showActions(formattedNumber) {
+      let tenDigits = formattedNumber.slice(-10);
+      let whatsappDigits = '91' + tenDigits;
+
+      actionContainer.innerHTML = `
+        <div style="margin-top: 20px; border-top: 1px solid #333; padding-top: 15px;">
+          <p>Action for <strong>${formattedNumber}</strong>:</p>
+          <div class="btn-group">
+            <a class="action-btn call-btn" href="tel:${formattedNumber}">
+              📞 Call
+            </a>
+            <a class="action-btn whatsapp-btn" href="https://wa.me/${whatsappDigits}" target="_blank">
+              💬 WhatsApp
+            </a>
+          </div>
+        </div>
+      `;
+    }
+  </script>
+
+</body>
+</html>
