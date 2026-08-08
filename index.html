@@ -15,35 +15,50 @@
       margin: 0;
       padding: 15px;
     }
-    .video-container {
+    .preview-container {
       position: relative;
       max-width: 500px;
       margin: 0 auto;
       border-radius: 12px;
       overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      background: #1e1e1e;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px dashed #3a3a3a;
     }
-    video {
+    #image-preview {
       width: 100%;
-      display: block;
-    }
-    canvas {
+      max-height: 350px;
+      object-fit: contain;
       display: none;
     }
-    #controls {
-      margin-top: 15px;
+    #placeholder-text {
+      color: #888;
+      padding: 20px;
     }
-    button {
-      padding: 12px 24px;
+    #controls {
+      margin-top: 20px;
+    }
+    .camera-btn {
+      display: inline-block;
+      padding: 14px 28px;
       font-size: 16px;
+      font-weight: bold;
       border: none;
       background: #007bff;
       color: white;
-      border-radius: 6px;
+      border-radius: 8px;
       cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3);
+    }
+    /* Hide the default file input */
+    #native-camera {
+      display: none;
     }
     #status {
-      margin-top: 10px;
+      margin-top: 15px;
       font-size: 14px;
       color: #aaa;
     }
@@ -107,17 +122,19 @@
 <body>
 
   <h2>Number Camera Scanner</h2>
-  <div class="video-container">
-    <video id="webcam" autoplay playsinline></video>
-  </div>
   
-  <canvas id="snapshot"></canvas>
+  <div class="preview-container">
+    <span id="placeholder-text">No photo taken yet</span>
+    <img id="image-preview" alt="Captured Photo" />
+  </div>
 
   <div id="controls">
-    <button id="scan-btn">Scan Frame</button>
+    <!-- Hidden native file input targeting rear camera -->
+    <input type="file" id="native-camera" accept="image/*" capture="environment">
+    <label for="native-camera" class="camera-btn">📸 Take Clear Photo</label>
   </div>
 
-  <p id="status">Point your camera at numbers and click Scan.</p>
+  <p id="status">Tap the button above to open your phone's camera.</p>
 
   <div id="result-box">
     <h3 id="result-header">Detected Numbers:</h3>
@@ -126,88 +143,74 @@
   </div>
 
   <script>
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('snapshot');
-    const scanBtn = document.getElementById('scan-btn');
+    const cameraInput = document.getElementById('native-camera');
+    const imagePreview = document.getElementById('image-preview');
+    const placeholderText = document.getElementById('placeholder-text');
     const statusText = document.getElementById('status');
     const numbersContainer = document.getElementById('numbers-container');
     const actionContainer = document.getElementById('action-container');
 
-    // 1. Initialize Back Camera
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { exact: "environment" } }
-        });
-        video.srcObject = stream;
-      } catch (err) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          video.srcObject = stream;
-        } catch (e) {
-          statusText.innerText = "Camera access denied or unavailable.";
-        }
-      }
-    }
+    // Process photo taken by phone camera app
+    cameraInput.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
 
-    initCamera();
+      // Display image preview
+      const imageUrl = URL.createObjectURL(file);
+      imagePreview.src = imageUrl;
+      imagePreview.style.display = 'block';
+      placeholderText.style.display = 'none';
 
-    // 2. Capture Frame and Perform OCR
-    scanBtn.addEventListener('click', async () => {
-      statusText.innerText = "Analyzing image...";
+      statusText.innerText = "Analyzing high-res photo...";
       numbersContainer.innerHTML = "";
       actionContainer.innerHTML = "";
-      
-      const context = canvas.getContext('2d');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Recognize text from canvas
-      const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
-      statusText.innerText = "Scan complete.";
+      try {
+        // Perform OCR on high-res image
+        const { data: { text } } = await Tesseract.recognize(file, 'eng');
+        statusText.innerText = "Scan complete.";
 
-      // 3. Regex for +91 numbers or 10-digit Indian mobile numbers
-      const phoneRegex = /(?:\+91[\s-]?)?[6-9]\d{9}/g;
-      const matches = text.match(phoneRegex);
+        // Regex for +91 numbers or 10-digit Indian mobile numbers
+        const phoneRegex = /(?:\+91[\s-]?)?[6-9]\d{9}/g;
+        const matches = text.match(phoneRegex);
 
-      if (matches && matches.length > 0) {
-        // Process & Deduplicate numbers
-        const uniqueNumbers = [...new Set(matches.map(num => {
-          let digitsOnly = num.replace(/\D/g, '');
-          return '+91' + digitsOnly.slice(-10);
-        }))];
+        if (matches && matches.length > 0) {
+          // Process & Deduplicate numbers
+          const uniqueNumbers = [...new Set(matches.map(num => {
+            let digitsOnly = num.replace(/\D/g, '');
+            return '+91' + digitsOnly.slice(-10);
+          }))];
 
-        numbersContainer.innerHTML = `<p>Select a number from below (${uniqueNumbers.length} found):</p>`;
-        
-        const listDiv = document.createElement('div');
-        listDiv.className = 'number-list';
-
-        uniqueNumbers.forEach((num) => {
-          const item = document.createElement('div');
-          item.className = 'number-item';
-          item.innerText = num;
+          numbersContainer.innerHTML = `<p>Select a number from below (${uniqueNumbers.length} found):</p>`;
           
-          item.addEventListener('click', () => {
-            // Highlight selected number
-            document.querySelectorAll('.number-item').forEach(el => el.classList.remove('selected'));
-            item.classList.add('selected');
+          const listDiv = document.createElement('div');
+          listDiv.className = 'number-list';
+
+          uniqueNumbers.forEach((num) => {
+            const item = document.createElement('div');
+            item.className = 'number-item';
+            item.innerText = num;
             
-            // Show Call & WhatsApp actions for selected number
-            showActions(num);
+            item.addEventListener('click', () => {
+              document.querySelectorAll('.number-item').forEach(el => el.classList.remove('selected'));
+              item.classList.add('selected');
+              showActions(num);
+            });
+
+            listDiv.appendChild(item);
           });
 
-          listDiv.appendChild(item);
-        });
+          numbersContainer.appendChild(listDiv);
 
-        numbersContainer.appendChild(listDiv);
-
-      } else {
-        numbersContainer.innerText = "No valid 10-digit or +91 numbers found.";
+        } else {
+          numbersContainer.innerText = "No valid 10-digit or +91 numbers found.";
+        }
+      } catch (err) {
+        statusText.innerText = "Error analyzing image.";
       }
     });
 
-    // 4. Render Action Buttons
+    // Render Action Buttons
     function showActions(formattedNumber) {
       let tenDigits = formattedNumber.slice(-10);
       let whatsappDigits = '91' + tenDigits;
